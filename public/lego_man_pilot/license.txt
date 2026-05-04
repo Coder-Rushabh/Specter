@@ -1,0 +1,11 @@
+Model Information:
+* title:	Lego man pilot
+* source:	https://sketchfab.com/3d-models/lego-man-pilot-87609996959243729dfa2d683e5caa23
+* author:	Emeli10 (https://sketchfab.com/Emeli10)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Lego man pilot" (https://sketchfab.com/3d-models/lego-man-pilot-87609996959243729dfa2d683e5caa23) by Emeli10 (https://sketchfab.com/Emeli10) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

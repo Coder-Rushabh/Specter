@@ -1,0 +1,30 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Next.js build output
+.next
+
+# Environment files — never bake secrets into the image
+.env
+.env.local
+.env.*.local
+
+# Large screenshot dumps
+public/screenshots
+
+# Dev/editor files
+.git
+.gitignore
+.DS_Store
+*.log
+README.md
+PRODUCT_OVERVIEW.md
+ENGINE_OVERVIEW.md
+
+# CDK infrastructure (not part of the app build)
+infra
+
+# Test/CI
+coverage
+.nyc_output
