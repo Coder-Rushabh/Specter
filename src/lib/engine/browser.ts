@@ -28,6 +28,9 @@ function isCDPTimeout(err: any): boolean {
 export class BrowserService {
     private stagehand: Stagehand | null = null;
     private page: any = null;
+    private get rawPage() {
+        return (this.page as any)?.page ?? (this.page as any)?._page ?? this.page;
+    }
     private metrics: HeuristicMetrics = {
         broken_links: [],
         navigation_latency: [],
@@ -379,7 +382,7 @@ export class BrowserService {
         if (!this.page) return;
         try {
             // 1. Escape closes most modal dialogs without side effects
-            await this.page.keyboard.press('Escape').catch(() => { });
+            await this.rawPage.keyboard.press('Escape').catch(() => { });
             await this.page.waitForTimeout(150);
 
             // 2. Click the first visible dismiss / accept button we can find
@@ -709,57 +712,50 @@ export class BrowserService {
         await this.page.evaluate(() => window.scrollTo(0, 0));
         await this.page.waitForTimeout(100);
 
-        const CTA_RE = /sign.?up|get.?start|start free|try.?free|try.?now|buy|purchase|pricing|plans?|checkout|demo|learn more|features|contact|subscribe|explore|watch|view|get.?demo|book.?a/i;
-
         try {
-            // page.$$() is compatible with all Playwright versions (locator().all() requires 1.29+)
-            const handles = await this.page.$$('a[href], button, [role="button"]');
-            const scrollY = await this.page.evaluate(() => window.scrollY).catch(() => 0);
+            const results = await this.page.evaluate((maxCount: number) => {
+                const CTA_RE = /sign.?up|get.?start|start free|try.?free|try.?now|buy|purchase|pricing|plans?|checkout|demo|learn more|features|contact|subscribe|explore|watch|view|get.?demo|book.?a/i;
+                const SELECTORS = 'a[href], button, [role="button"]';
+                const found: any[] = [];
+                const seen = new Set<string>();
+                const scrollY = window.scrollY;
 
-            const found: Array<{ text: string; x: number; y: number; w: number; h: number; isNavLink: boolean; priority: number }> = [];
-            const seen = new Set<string>();
+                for (const el of Array.from(document.querySelectorAll(SELECTORS))) {
+                    if (found.length >= 50) break;
 
-            for (const handle of handles) {
-                if (found.length >= 50) break;
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width < 5 || rect.height < 5) continue;
 
-                // boundingBox returns null if element is not rendered / has 0 size / is hidden
-                const box = await handle.boundingBox().catch(() => null);
-                if (!box || box.width < 5 || box.height < 5) continue;
+                    const text = (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+                    if (!text || text.length < 2 || seen.has(text.toLowerCase())) continue;
+                    seen.add(text.toLowerCase());
 
-                const text = ((await handle.textContent().catch(() => '')) || '')
-                    .replace(/\s+/g, ' ').trim().slice(0, 60);
-                if (!text || text.length < 2 || seen.has(text.toLowerCase())) continue;
-                seen.add(text.toLowerCase());
+                    const href = (el as any).href || '';
+                    if (href.startsWith('mailto:') || href.startsWith('tel:') || href.includes('javascript:')) continue;
 
-                const href: string = await handle.evaluate((el: any) => el.href || '').catch(() => '');
-                if (href.startsWith('mailto:') || href.startsWith('tel:') || href.includes('javascript:')) continue;
+                    const isNav = !!el.closest('nav, header, [role="navigation"], [class*="nav"], [class*="header"], [class*="menu"]');
+                    const isBtn = el.tagName === 'BUTTON' || el.getAttribute('role') === 'button';
+                    const priority = CTA_RE.test(text) ? 10 : isBtn ? 8 : isNav ? 7 : 4;
 
-                const isNav: boolean = await handle.evaluate((el: Element) =>
-                    !!el.closest('nav, header, [role="navigation"], [class*="nav"], [class*="header"], [class*="menu"]')
-                ).catch(() => false);
+                    found.push({
+                        text,
+                        x: Math.round(rect.left + rect.width / 2 + window.scrollX),
+                        y: Math.round(rect.top + rect.height / 2 + window.scrollY),
+                        w: Math.round(rect.width),
+                        h: Math.round(rect.height),
+                        isNavLink: isNav,
+                        priority,
+                    });
+                }
 
-                const isBtn: boolean = await handle.evaluate((el: Element) =>
-                    el.tagName === 'BUTTON' || el.getAttribute('role') === 'button'
-                ).catch(() => false);
+                return found
+                    .sort((a, b) => b.priority - a.priority)
+                    .slice(0, maxCount)
+                    .map(({ priority: _p, ...rest }) => rest);
+            }, max);
 
-                const priority = CTA_RE.test(text) ? 10 : isBtn ? 8 : isNav ? 7 : 4;
-
-                // box.x/box.y are viewport-relative; add scrollY for absolute document coords
-                found.push({
-                    text,
-                    x: Math.round(box.x + box.width / 2),
-                    y: Math.round(box.y + scrollY + box.height / 2),
-                    w: Math.round(box.width),
-                    h: Math.round(box.height),
-                    isNavLink: isNav,
-                    priority,
-                });
-            }
-
-            const results = found.sort((a, b) => b.priority - a.priority).slice(0, max);
-            console.log(`getHeuristicClicks: ${handles.length} locators → ${found.length} valid → taking ${results.length}: [${results.map(r => `"${r.text}"`).join(', ')}]`);
-
-            return results.map(({ priority: _p, ...rest }) => rest);
+            console.log(`getHeuristicClicks: found ${results.length} targets: [${results.map((r: any) => `"${r.text}"`).join(', ')}]`);
+            return results;
         } catch (err: any) {
             console.warn(`getHeuristicClicks failed: ${err.message}`);
             return [];
@@ -785,7 +781,7 @@ export class BrowserService {
         const viewportY = y - actualScrollY;
         const viewportX = x; // horizontal scroll is almost never an issue
 
-        await this.page.mouse.click(viewportX, viewportY);
+        await this.rawPage.mouse.click(viewportX, viewportY);
         await this.page.waitForTimeout(250);
         await this.page.waitForLoadState('domcontentloaded', { timeout: 4000 }).catch(() => { });
 

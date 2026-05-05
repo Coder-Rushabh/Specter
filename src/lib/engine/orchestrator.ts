@@ -110,7 +110,11 @@ export class Orchestrator {
                     const project = sessionData.persona_configs?.projects;
                     provider = project?.llm_provider || 'gemini';
                     modelName = project?.llm_model_name || undefined;
-                    if (project?.encrypted_llm_key) {
+                    
+                    // Prioritize .env key for local development/fixes, fallback to DB key
+                    if (provider === 'gemini' && process.env.GEMINI_API_KEY) {
+                        apiKey = process.env.GEMINI_API_KEY;
+                    } else if (project?.encrypted_llm_key) {
                         try { apiKey = decrypt(project.encrypted_llm_key); } catch (_) { }
                     }
                 }
