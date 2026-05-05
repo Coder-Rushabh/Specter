@@ -1,5 +1,4 @@
 import { Stagehand } from '@browserbasehq/stagehand';
-import { chromium, Browser, BrowserContext, Page } from 'playwright';
 import { Observation, ObservationSection, HeuristicMetrics, Action } from './types';
 
 function isCDPTimeout(err: any): boolean {
@@ -28,10 +27,7 @@ function isCDPTimeout(err: any): boolean {
 
 export class BrowserService {
     private stagehand: Stagehand | null = null;
-    // Raw Playwright browser used in local mode (no Stagehand)
-    private pwBrowser: Browser | null = null;
-    private pwContext: BrowserContext | null = null;
-    private page: Page | null = null;
+    private page: any = null;
     private metrics: HeuristicMetrics = {
         broken_links: [],
         navigation_latency: [],
@@ -45,87 +41,69 @@ export class BrowserService {
 
     // ─── Init ───────────────────────────────────────────────────────────────────
 
-    async init(modelName: string = 'google/gemini-2.0-flash', apiKey?: string, browserMode?: 'browserbase' | 'local', browserbaseCreds?: { apiKey?: string; projectId?: string }) {
+    async init(modelName: string = 'google/gemini-2.0-flash', apiKey?: string) {
         try {
-            const useBrowserbase = browserMode
-                ? browserMode === 'browserbase'
-                : !!process.env.BROWSERBASE_API_KEY;
+            const isGemini = modelName.includes('gemini');
+            const resolvedApiKey = isGemini
+                ? (apiKey || process.env.GEMINI_API_KEY)
+                : (apiKey || process.env.OPENAI_API_KEY);
 
-            console.log(`[BrowserService.init] mode: ${useBrowserbase ? 'browserbase/stagehand' : 'local/playwright'} | apiKey present: ${!!apiKey}`);
+            const useBrowserbase = !!process.env.BROWSERBASE_API_KEY;
 
-            if (useBrowserbase) {
-                // ── Stagehand + Browserbase ──────────────────────────────────────────
-                const isGemini = modelName.includes('gemini');
-                const resolvedApiKey = isGemini
-                    ? (apiKey || process.env.GEMINI_API_KEY)
-                    : (apiKey || process.env.OPENAI_API_KEY);
-
-                // User-supplied creds take priority over env vars
-                const bbApiKey = browserbaseCreds?.apiKey || process.env.BROWSERBASE_API_KEY;
-                const bbProjectId = browserbaseCreds?.projectId || process.env.BROWSERBASE_PROJECT_ID;
-
-                console.log(`[BrowserService.init] BrowserBase apiKey present: ${!!bbApiKey} | projectId present: ${!!bbProjectId}`);
-
-                const stagehandConfig: any = {
+            const stagehandConfig: any = useBrowserbase
+                // ── Browserbase (Railway / production) ──────────────────────────────
+                // Browser runs in Browserbase cloud — no local Chromium needed.
+                // BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID must be set.
+                ? {
                     env: 'BROWSERBASE',
-                    apiKey: bbApiKey,
-                    projectId: bbProjectId,
+                    apiKey: process.env.BROWSERBASE_API_KEY,
+                    projectId: process.env.BROWSERBASE_PROJECT_ID,
                     verbose: 0,
                     disableAPI: true,
                     model: { modelName, apiKey: resolvedApiKey },
+                }
+                // ── Local Chromium (dev / no Browserbase configured) ─────────────────
+                : {
+                    env: 'LOCAL',
+                    verbose: 0,
+                    disableAPI: true,
+                    model: { modelName, apiKey: resolvedApiKey },
+                    localBrowserLaunchOptions: {
+                        headless: true,
+                        viewport: { width: 1280, height: 800 },
+                        args: [
+                            '--no-sandbox',
+                            '--disable-setuid-sandbox',
+                            '--disable-dev-shm-usage',
+                            '--disable-gpu',
+                            '--disable-extensions',
+                            '--disable-plugins',
+                            '--disable-background-networking',
+                            '--disable-background-timer-throttling',
+                            '--disable-sync',
+                            '--disable-translate',
+                            '--disable-default-apps',
+                            '--disable-notifications',
+                            '--disable-hang-monitor',
+                            '--no-first-run',
+                            '--mute-audio',
+                            '--disable-component-update',
+                        ]
+                    }
                 };
 
-                console.log(`[BrowserService.init] Launching Stagehand (Browserbase)...`);
-                this.stagehand = new Stagehand(stagehandConfig);
-                await this.stagehand.init();
-                await this.setupPage();
-                console.log(`[BrowserService.init] Stagehand ready.`);
-            } else {
-                // ── Raw Playwright (local) ───────────────────────────────────────────
-                console.log(`[BrowserService.init] Launching raw Playwright Chromium...`);
-                this.pwBrowser = await chromium.launch({
-                    headless: true,
-                    args: [
-                        '--no-sandbox',
-                        '--disable-setuid-sandbox',
-                        '--disable-dev-shm-usage',
-                        '--disable-gpu',
-                        '--disable-extensions',
-                        '--disable-background-networking',
-                        '--disable-background-timer-throttling',
-                        '--no-first-run',
-                        '--mute-audio',
-                    ]
-                });
-                this.pwContext = await this.pwBrowser.newContext({
-                    viewport: { width: 1280, height: 800 },
-                    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                });
-                this.page = await this.pwContext.newPage();
-
-                // Network listeners
-                this.attachNetworkListeners(this.pwContext);
-
-                // Auto-dismiss dialogs
-                this.page.on('dialog', (dialog: any) => dialog.dismiss().catch(() => {}));
-
-                // Track new tabs
-                this.pwContext.on('page', async (newPage: any) => {
-                    console.log(`New tab opened: ${newPage.url()}. Switching focus...`);
-                    this.page = newPage;
-                    await newPage.bringToFront().catch(() => {});
-                });
-
-                console.log(`[BrowserService.init] Playwright Chromium ready.`);
-            }
+            console.log(`Initializing Stagehand (${useBrowserbase ? 'Browserbase' : 'local Chromium'})...`);
+            this.stagehand = new Stagehand(stagehandConfig);
+            await this.stagehand.init();
+            await this.setupPage();
+            console.log('Stagehand ready.');
         } catch (err: any) {
-            console.error(`[BrowserService.init] FAILED: ${err.message}`);
-            console.error(`[BrowserService.init] Stack: ${err.stack}`);
+            console.error('Stagehand init failed:', err.message);
             throw err;
         }
     }
 
-    // ─── Page setup (Stagehand mode only) ───────────────────────────────────────
+    // ─── Page setup ─────────────────────────────────────────────────────────────
 
     private async setupPage(): Promise<void> {
         const context = (this.stagehand as any).context;
@@ -153,6 +131,9 @@ export class BrowserService {
         if (!this.page) throw new Error('Stagehand failure: Page object not found.');
         await this.page.setViewportSize?.({ width: 1280, height: 800 }).catch(() => { });
 
+        // Auto-dismiss browser-level dialogs (notification prompts, alerts, confirms).
+        // Stagehand wraps Playwright's page and doesn't proxy all events — use the
+        // underlying Playwright page (_page) if available, fall back gracefully.
         try {
             const rawPage = (this.page as any)._page ?? this.page;
             rawPage.on('dialog', (dialog: any) => dialog.dismiss().catch(() => { }));
@@ -370,7 +351,7 @@ export class BrowserService {
     // ─── Full-page scan: dynamic N-slice coverage ───────────────────────────────
 
     async observeFullPage(): Promise<Observation> {
-        if (!this.page) return this.emptyObservation();
+        if (!this.page || !this.stagehand) return this.emptyObservation();
         return this._observeFullPage().catch((err: any) => {
             if (isCDPTimeout(err)) throw err;
             return this.emptyObservation();
@@ -378,7 +359,7 @@ export class BrowserService {
     }
 
     private async _observeFullPage(): Promise<Observation> {
-        if (!this.page) return this.emptyObservation();
+        if (!this.page || !this.stagehand) return this.emptyObservation();
         return this._captureAllSlices();
     }
 
@@ -545,7 +526,7 @@ export class BrowserService {
     // ─── Light observe: current viewport only (post-action checks) ──────────────
 
     async observe(): Promise<Observation> {
-        if (!this.page) return this.emptyObservation();
+        if (!this.page || !this.stagehand) return this.emptyObservation();
         try {
             const slice = await this.captureSlice('Current');
             const dom = await this.extractDOMFast();
@@ -576,53 +557,41 @@ export class BrowserService {
     // ─── Actions ────────────────────────────────────────────────────────────────
 
     async perform(action: Action) {
-        if (!this.page) throw new Error('Browser not initialized');
+        if (!this.page || !this.stagehand) throw new Error('Browser not initialized');
         return this._perform(action);
     }
 
     private async _perform(action: Action) {
-        if (!this.page) throw new Error('Browser not initialized');
+        if (!this.page || !this.stagehand) throw new Error('Browser not initialized');
 
         const oldUrl = this.page.url();
+        const oldPageCount = (this.stagehand as any).context?.pages?.()?.length ?? 1;
 
         try {
             switch (action.type) {
                 case 'click':
                 case 'type': {
+                    const instruction = action.type === 'click'
+                        ? `Click on: ${action.text || action.reasoning}`
+                        : `Type "${action.text}" into the field for: ${action.reasoning}`;
+
+                    console.log(`Stagehand: ${instruction}`);
                     const t0 = Date.now();
-                    if (this.stagehand) {
-                        // Stagehand mode — use act() for AI-guided interaction
-                        const instruction = action.type === 'click'
-                            ? `Click on: ${action.text || action.reasoning}`
-                            : `Type "${action.text}" into the field for: ${action.reasoning}`;
-                        console.log(`Stagehand act: ${instruction}`);
-                        await this.stagehand.act(instruction, { page: this.page });
-                    } else {
-                        // Local Playwright mode — direct selector/coordinate click
-                        if (action.type === 'click') {
-                            if (action.selector) {
-                                await this.page.click(action.selector, { timeout: 8000 }).catch(async () => {
-                                    // Fallback: find element by text content
-                                    if (action.text) {
-                                        const el = await this.page!.getByText(action.text, { exact: false }).first();
-                                        await el.click({ timeout: 5000 }).catch(() => {});
-                                    }
-                                });
-                            } else if (action.text) {
-                                const el = await this.page.getByText(action.text, { exact: false }).first();
-                                await el.click({ timeout: 5000 }).catch(() => {});
-                            }
-                        } else if (action.type === 'type' && action.text) {
-                            if (action.selector) {
-                                await this.page.fill(action.selector, action.text, { timeout: 8000 }).catch(() => {});
-                            } else {
-                                await this.page.keyboard.type(action.text);
-                            }
-                        }
-                    }
+                    await this.stagehand.act(instruction, { page: this.page });
                     this.metrics.action_latency.push(Date.now() - t0);
-                    await this.page.waitForTimeout(300);
-                    await this.page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
+
+                    for (let i = 0; i < 3; i++) {
+                        await this.page.waitForTimeout(300);
+                        const newCount = (this.stagehand as any).context?.pages?.()?.length ?? 1;
+                        if (newCount > oldPageCount) {
+                            const pages = (this.stagehand as any).context.pages();
+                            this.page = pages[pages.length - 1];
+                            await this.page.bringToFront?.().catch(() => { });
+                            break;
+                        }
+                        if (this.page.url() !== oldUrl) break;
+                    }
+                    await this.page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => { });
                     break;
                 }
 
@@ -641,12 +610,16 @@ export class BrowserService {
                     break;
             }
         } catch (err) {
-            console.warn(`Action "${action.type}" failed:`, err);
+            console.warn(`Stagehand action "${action.type}" failed:`, err);
+            if (action.type === 'click' && action.selector) {
+                await this.page.click(action.selector, { timeout: 5000 }).catch(() => { });
+            }
         }
 
         const newUrl = this.page.url();
-        if (newUrl !== oldUrl) {
-            await this.page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
+        const newPageCount = (this.stagehand as any).context?.pages?.()?.length ?? 1;
+        if (newUrl !== oldUrl || newPageCount > oldPageCount) {
+            await this.page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => { });
         }
     }
 
@@ -706,9 +679,9 @@ export class BrowserService {
     // would trigger.
 
     async observeFastPage(): Promise<Observation> {
-        if (!this.page) return this.emptyObservation();
+        if (!this.page || !this.stagehand) return this.emptyObservation();
         return this._observeFastPage().catch((err: any) => {
-            if (isCDPTimeout(err)) throw err;
+            if (isCDPTimeout(err)) throw err; // propagate so orchestrator can restart browser
             return this.emptyObservation();
         });
     }
@@ -842,38 +815,28 @@ export class BrowserService {
     }
 
     async close() {
-        if (this.stagehand) await this.stagehand.close().catch(() => {});
-        if (this.pwBrowser) await this.pwBrowser.close().catch(() => {});
+        if (this.stagehand) await this.stagehand.close().catch(() => { });
         this.page = null;
         this.stagehand = null;
-        this.pwBrowser = null;
-        this.pwContext = null;
     }
 
     // ─── Cookie portability (persist auth across per-page browser instances) ──
 
     async exportCookies(): Promise<any[]> {
+        if (!this.stagehand) return [];
         try {
-            if (this.stagehand) {
-                const context = (this.stagehand as any).context;
-                return await context?.cookies?.() ?? [];
-            }
-            if (this.pwContext) return await this.pwContext.cookies();
-            return [];
+            const context = (this.stagehand as any).context;
+            return await context?.cookies?.() ?? [];
         } catch {
             return [];
         }
     }
 
     async restoreCookies(cookies: any[]): Promise<void> {
-        if (!cookies.length) return;
+        if (!this.stagehand || !cookies.length) return;
         try {
-            if (this.stagehand) {
-                const context = (this.stagehand as any).context;
-                if (context?.addCookies) await context.addCookies(cookies);
-            } else if (this.pwContext) {
-                await this.pwContext.addCookies(cookies);
-            }
+            const context = (this.stagehand as any).context;
+            if (context?.addCookies) await context.addCookies(cookies);
         } catch { }
     }
 

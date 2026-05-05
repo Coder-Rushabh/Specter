@@ -36,20 +36,28 @@ export default function SessionPage() {
     const supabase = createClient();
     const logsEndRef = useRef<HTMLDivElement>(null);
     const terminalEndRef = useRef<HTMLDivElement>(null);
-    const { getToken, isLoaded } = useAuth();
+    const { getToken } = useAuth();
 
     useEffect(() => {
-        if (session?.status === 'completed' && session?.test_run_id) {
-            const t = setTimeout(() => {
-                router.push(`/reports/${session.test_run_id}`);
-            }, 3000);
-            return () => clearTimeout(t);
+        if (session?.status === 'completed') {
+            const checkReport = async () => {
+                const { data: run } = await supabase
+                    .from('test_runs')
+                    .select('status')
+                    .eq('id', session.test_run_id)
+                    .single();
+
+                if (run?.status === 'completed') {
+                    setTimeout(() => {
+                        router.push(`/reports/${session.test_run_id}`);
+                    }, 3000);
+                }
+            };
+            checkReport();
         }
-    }, [session?.status, session?.test_run_id, router]);
+    }, [session?.status, session?.test_run_id, router, supabase]);
 
     useEffect(() => {
-        if (!isLoaded) return;
-
         async function fetchData() {
             const token = await getToken();
             const authenticatedSupabase = createClient(token || undefined);
@@ -106,8 +114,7 @@ export default function SessionPage() {
                 .on('broadcast', { event: 'log' }, (payload: any) => {
                     const message = payload.payload?.message;
                     if (message) {
-                        const line = `[LIVE] ${message}`;
-                        setTerminalLines(prev => prev[prev.length - 1] === line ? prev : [...prev, line]);
+                        setTerminalLines(prev => [...prev, `[LIVE] ${message}`]);
                     }
                 })
                 .subscribe();
@@ -141,7 +148,7 @@ export default function SessionPage() {
         }
 
         fetchData();
-    }, [sessionId, getToken, isLoaded]);
+    }, [sessionId, getToken]);
 
     useEffect(() => {
         logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -151,10 +158,13 @@ export default function SessionPage() {
         terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [terminalLines]);
 
-    const MAX_PAGES = 10;
+    const MAX_PAGES = 15;
+    const MAX_ACTIONS_PAGE = 5;
 
     const pageMatch = session?.live_status?.match(/Page\s+(\d+)/i);
+    const actionMatch = session?.live_status?.match(/Action\s+(\d+)\/(\d+)/i);
     const pagesVisited = pageMatch ? parseInt(pageMatch[1], 10) : 0;
+    const currentPageAction = actionMatch ? parseInt(actionMatch[1], 10) : 0;
 
     const uniquePages = new Set(logs.map((l: any) => l.current_url).filter(Boolean)).size;
     const effectivePages = Math.max(pagesVisited, uniquePages);
@@ -162,8 +172,10 @@ export default function SessionPage() {
     const stepsCompleted = logs.filter((l: any) => (l.action_taken as any)?.type !== 'system').length;
 
     const pageProgress = Math.min(effectivePages / MAX_PAGES, 1);
+    const actionProgress = effectivePages > 0 ? currentPageAction / MAX_ACTIONS_PAGE : 0;
     const overallPct = session?.status === 'completed' ? 100
-        : Math.min(Math.round(pageProgress * 100), 99);
+        : session?.status === 'error' ? Math.round(pageProgress * 100)
+            : Math.min(Math.round((pageProgress * 0.7 + actionProgress * 0.3) * 100), 99);
 
     if (loading) return (
         <div className="flex items-center justify-center p-20 text-slate-400 text-sm">
@@ -266,13 +278,6 @@ export default function SessionPage() {
                                 : `On page ${effectivePages} of ${MAX_PAGES}`
                     }
                 </p>
-
-                {session?.status === 'completed' && session?.test_run_id && (
-                    <div className="flex items-center gap-2 pt-1 text-xs text-emerald-600">
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                        Redirecting to report in a moment…
-                    </div>
-                )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -492,55 +497,12 @@ export default function SessionPage() {
                                                         </div>
                                                     )}
 
-                                                    {/* Section-level emotion */}
-                                                    {(action?.specific_emotion || log.emotion_tag) && (() => {
-                                                        const raw = (action?.specific_emotion || '').toLowerCase();
-                                                        const resolvedKey = (log.emotion_tag && log.emotion_tag !== 'neutral')
-                                                            ? log.emotion_tag
-                                                            : raw.includes('frustrat') || raw.includes('angry') ? 'frustration'
-                                                            : raw.includes('confus') || raw.includes('skeptic') ? 'confusion'
-                                                            : raw.includes('delight') || raw.includes('excit') ? 'delight'
-                                                            : raw.includes('satisf') || raw.includes('curio') || raw.includes('intrigu') || raw.includes('interest') ? 'delight'
-                                                            : log.emotion_tag;
-                                                        return (
-                                                            <div className="flex items-center gap-1.5">
-                                                                {emotionIcons[resolvedKey as keyof typeof emotionIcons] || emotionIcons.neutral}
-                                                                <span className="text-[10px] font-medium text-slate-500 capitalize">
-                                                                    {action?.specific_emotion || log.emotion_tag}
-                                                                </span>
-                                                            </div>
-                                                        );
-                                                    })()}
-
-                                                    {/* Page-level summary — only on last section of each page */}
-                                                    {(action?.friction_points?.length > 0 || action?.positives?.length > 0) && (
-                                                        <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
-                                                            {action.overall_emotion && (
-                                                                <div className="flex items-center gap-1.5">
-                                                                    <span className="text-[10px] font-medium text-slate-400">Page emotion:</span>
-                                                                    <span className="text-[10px] font-semibold text-indigo-600">{action.overall_emotion}</span>
-                                                                </div>
-                                                            )}
-                                                            {action.friction_points?.length > 0 && (
-                                                                <div className="space-y-0.5">
-                                                                    <span className="text-[10px] font-medium text-red-500">Friction</span>
-                                                                    {action.friction_points.map((f: string, idx: number) => (
-                                                                        <p key={idx} className="text-[10px] text-slate-500 flex gap-1 leading-relaxed">
-                                                                            <span className="text-red-400 shrink-0">✗</span>{f}
-                                                                        </p>
-                                                                    ))}
-                                                                </div>
-                                                            )}
-                                                            {action.positives?.length > 0 && (
-                                                                <div className="space-y-0.5">
-                                                                    <span className="text-[10px] font-medium text-emerald-500">Positives</span>
-                                                                    {action.positives.map((p: string, idx: number) => (
-                                                                        <p key={idx} className="text-[10px] text-slate-500 flex gap-1 leading-relaxed">
-                                                                            <span className="text-emerald-400 shrink-0">✓</span>{p}
-                                                                        </p>
-                                                                    ))}
-                                                                </div>
-                                                            )}
+                                                    {log.emotion_tag && (
+                                                        <div className="flex items-center gap-1.5">
+                                                            {emotionIcons[log.emotion_tag as keyof typeof emotionIcons] || emotionIcons.neutral}
+                                                            <span className="text-[10px] font-medium text-slate-500 capitalize">
+                                                                {log.emotion_tag}
+                                                            </span>
                                                         </div>
                                                     )}
                                                 </div>

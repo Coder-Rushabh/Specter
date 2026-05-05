@@ -16,9 +16,6 @@ export async function createTestRun(formData: {
     scope: string;
     requiresAuth: boolean;
     executionMode: 'autonomous' | 'manual';
-    browserMode: 'browserbase' | 'local';
-    browserbaseApiKey?: string;
-    browserbaseProjectId?: string;
     llmProvider: 'ollama' | 'gemini' | 'openrouter';
     llmApiKey?: string;
     llmModelName?: string;
@@ -52,7 +49,7 @@ export async function createTestRun(formData: {
         }
     }
 
-    const llmApiKey = formData.llmApiKey || undefined;
+    const llmApiKey = formData.llmApiKey || (formData.llmProvider === 'gemini' ? process.env.GEMINI_API_KEY : undefined);
 
     // 2. Create or find Project (including credentials)
     const { data: project, error: pError } = await (adminSupabase
@@ -123,38 +120,17 @@ export async function createTestRun(formData: {
         // Create a session for each persona based on the count
         const count = p.personaCount || 1;
         for (let i = 0; i < count; i++) {
-            const sessionPayload: any = {
+            const { data: session, error: sError } = await (adminSupabase.from('persona_sessions') as any).insert({
                 test_run_id: (testRun as any).id,
                 persona_config_id: (config as any).id,
                 status: 'queued',
-                execution_mode: formData.executionMode,
-                browser_mode: formData.browserMode,
-            };
-
-            let session: any = null;
-            let sError: any = null;
-
-            console.log(`[createTestRun] Inserting session — browserMode: ${formData.browserMode} | executionMode: ${formData.executionMode}`);
-
-            // Try inserting with browser_mode first; fall back without it if the column
-            // doesn't exist yet (migration not applied).
-            ({ data: session, error: sError } = await (adminSupabase.from('persona_sessions') as any)
-                .insert(sessionPayload).select().single());
-
-            if (sError?.message?.includes('browser_mode') || sError?.code === '42703') {
-                console.warn('[createTestRun] browser_mode column missing — retrying without it. Run the migration: 20260504_add_browser_mode.sql');
-                const { browser_mode: _bm, ...payloadWithout } = sessionPayload;
-                ({ data: session, error: sError } = await (adminSupabase.from('persona_sessions') as any)
-                    .insert(payloadWithout).select().single());
-            }
+                execution_mode: formData.executionMode
+            }).select().single();
 
             if (sError || !session) {
-                console.error('[createTestRun] Session insert FAILED:', JSON.stringify(sError));
+                console.error('Error creating persona session:', sError);
                 continue;
             }
-
-            console.log(`[createTestRun] Session created: ${session.id} | launching orchestrator...`);
-            console.log(`[createTestRun] llmProvider: ${formData.llmProvider} | llmApiKey present: ${!!llmApiKey} | llmApiKey prefix: ${llmApiKey?.slice(0, 8) ?? 'none'} | browserMode: ${formData.browserMode}`);
 
             // Launch Orchestrator (Fire and forget - do NOT await here to avoid server action timeouts)
             const orchestrator = new Orchestrator();
@@ -168,16 +144,13 @@ export async function createTestRun(formData: {
                 goal_prompt: p.prompt,
             } as any;
 
+            console.log(`Launching orchestrator for session ${session.id}...`);
             orchestrator.runSession(session.id, formData.url, personaProfile, {
                 provider: formData.llmProvider,
                 apiKey: llmApiKey,
                 modelName: formData.llmModelName,
-            }, formData.browserMode, {
-                apiKey: formData.browserbaseApiKey,
-                projectId: formData.browserbaseProjectId,
             }).catch((err: any) => {
-                console.error(`[createTestRun] Orchestrator for session ${session.id} threw unhandled error:`, err.message);
-                console.error(`[createTestRun] Stack:`, err.stack);
+                console.error(`Autonomous session ${session.id} failed:`, err);
             });
         }
     }
@@ -220,8 +193,7 @@ export async function suggestAudienceArchetypes(formData: {
     try {
         console.log(`[suggestAudienceArchetypes] Initializing browser...`);
         const initStart = Date.now();
-        const geminiKey = formData.llmApiKey || process.env.GEMINI_API_KEY;
-        await browser.init("google/gemini-2.0-flash", geminiKey);
+        await browser.init("google/gemini-2.0-flash", process.env.GEMINI_API_KEY);
         console.log(`[suggestAudienceArchetypes] Browser init'd in ${Date.now() - initStart}ms. Navigating...`);
         
         const navStart = Date.now();
@@ -245,7 +217,7 @@ export async function suggestAudienceArchetypes(formData: {
     }
 
     const provider = formData.llmProvider || 'gemini';
-    const apiKey = formData.llmApiKey || undefined;
+    const apiKey = formData.llmApiKey || (provider === 'gemini' ? process.env.GEMINI_API_KEY : undefined);
     console.log(`[suggestAudienceArchetypes] Using LLM provider: ${provider}`);
     const llm = new LLMService({ provider, apiKey, modelName: formData.llmModelName });
 
@@ -309,8 +281,7 @@ export async function generateAIPersonas(formData: {
     try {
         console.log(`[generateAIPersonas] Initializing browser...`);
         const initStart = Date.now();
-        const geminiKey = formData.llmApiKey || process.env.GEMINI_API_KEY;
-        await browser.init("google/gemini-2.0-flash", geminiKey);
+        await browser.init("google/gemini-2.0-flash", process.env.GEMINI_API_KEY);
         console.log(`[generateAIPersonas] Browser init'd in ${Date.now() - initStart}ms. Navigating...`);
         
         const navStart = Date.now();
@@ -334,7 +305,7 @@ export async function generateAIPersonas(formData: {
     }
 
     const provider = formData.llmProvider || 'gemini';
-    const apiKey = formData.llmApiKey || undefined;
+    const apiKey = formData.llmApiKey || (provider === 'gemini' ? process.env.GEMINI_API_KEY : undefined);
     console.log(`[generateAIPersonas] Using LLM provider: ${provider}`);
     const llm = new LLMService({ provider, apiKey, modelName: formData.llmModelName });
 

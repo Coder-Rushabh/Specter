@@ -1,5 +1,3 @@
-export const dynamic = 'force-dynamic';
-
 import { createAdminClient } from '@/lib/supabase/admin';
 import { auth } from '@clerk/nextjs/server';
 import { redirect } from 'next/navigation';
@@ -19,7 +17,6 @@ import { ReportActions } from '@/components/reports/ReportActions';
 import { TechnicalAudit } from '@/components/reports/TechnicalAudit';
 import { MetricTooltip } from '@/components/reports/MetricTooltip';
 import { ScrollToTop } from '@/components/reports/ScrollToTop';
-import { AutoRefresh } from '@/components/reports/AutoRefresh';
 
 export default async function ReportPage({ params }: { params: Promise<{ testRunId: string }> }) {
   const { testRunId } = await params;
@@ -209,13 +206,12 @@ export default async function ReportPage({ params }: { params: Promise<{ testRun
           </div>
         ) : (
           <div className="py-10 flex flex-col items-center justify-center text-center space-y-3 rounded-xl border border-dashed border-slate-300 bg-white">
-            <AutoRefresh />
             <div className="h-10 w-10 rounded-full bg-indigo-50 border border-indigo-200 flex items-center justify-center animate-pulse">
               <Sparkles className="h-5 w-5 text-indigo-500" />
             </div>
             <div className="space-y-1">
               <h3 className="text-sm font-semibold text-slate-900">Analysis in progress...</h3>
-              <p className="text-xs text-slate-400 max-w-xs mx-auto">AI is reviewing session data to generate your insights.</p>
+              <p className="text-xs text-slate-400 max-w-xs mx-auto">AI is reviewing session data to generate your insights. Refresh in a few moments.</p>
             </div>
           </div>
         )}

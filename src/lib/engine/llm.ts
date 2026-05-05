@@ -151,10 +151,10 @@ Point to exact elements: headlines, CTAs, images, forms, navigation items.
 Return JSON matching this structure:
 {
   "sections": [
-    { "label": "Top", "ux_feedback": "specific critique of this section for this persona", "emotional_state": "<one of: delight|satisfaction|curiosity|surprise|neutral|confusion|boredom|frustration|disappointment>", "emotional_intensity": 0.0-1.0, "proposed_solution": "specific fix" },
-    ...one entry per section, emotions MUST differ across sections based on each section's actual content...
+    { "label": "Top", "ux_feedback": "...", "emotional_state": "...", "emotional_intensity": 0.0-1.0, "proposed_solution": "..." },
+    ...
   ],
-  "overall_emotion": "<one of: delight|satisfaction|curiosity|surprise|neutral|confusion|boredom|frustration|disappointment>",
+  "overall_emotion": "...",
   "overall_intensity": 0.0-1.0,
   "page_summary": "2-3 sentence summary of overall UX quality for this persona"
 }`;
@@ -188,10 +188,9 @@ ${!isAuthPage && availableLinks.length > 0 ? `\nAvailable links on this page (ch
 Return JSON:
 {
   "sections": [
-    { "label": "Top|Mid|Bottom", "ux_feedback": "specific critique of THIS section only, not the page overall", "emotional_state": "<one of: delight|satisfaction|curiosity|surprise|neutral|confusion|boredom|frustration|disappointment>", "emotional_intensity": 0.0-1.0, "proposed_solution": "..." }
-    ...one entry per section, each section MUST have its own emotion based on what IS in that section...
+    { "label": "Top|Mid|Bottom", "ux_feedback": "specific critique", "emotional_state": "...", "emotional_intensity": 0.0-1.0, "proposed_solution": "..." }
   ],
-  "overall_emotion": "<one of: delight|satisfaction|curiosity|surprise|neutral|confusion|boredom|frustration|disappointment>",
+  "overall_emotion": "...",
   "overall_intensity": 0.0-1.0,
   "page_summary": "2-3 sentence overall UX quality assessment for this persona",
   "friction_points": ["specific UX problem 1", "specific UX problem 2"],
@@ -745,17 +744,8 @@ export class OpenRouterProvider implements LLMProvider {
         if (candidate) {
             // 1. Try as-is (valid JSON)
             try { JSON.parse(candidate); return candidate; } catch { /* fall through */ }
-            // 2. Sanitize control characters (literal newlines/tabs inside string values)
-            //    OpenRouter models embed raw \n inside JSON strings — must escape them first
-            const sanitized = candidate.replace(/[\u0000-\u001F]/g, ch => {
-                if (ch === '\n') return '\\n';
-                if (ch === '\r') return '\\r';
-                if (ch === '\t') return '\\t';
-                return '';
-            });
-            try { JSON.parse(sanitized); return sanitized; } catch { /* fall through */ }
-            // 3. Try fixing unquoted keys: { type: "x" } → { "type": "x" }
-            const fixed = sanitized.replace(/([{,]\s*)([a-zA-Z_]\w*)\s*:/g, '$1"$2":');
+            // 2. Try fixing unquoted keys: { type: "x" } → { "type": "x" }
+            const fixed = candidate.replace(/([{,]\s*)([a-zA-Z_]\w*)\s*:/g, '$1"$2":');
             try { JSON.parse(fixed); return fixed; } catch { /* fall through */ }
         }
 
@@ -849,8 +839,8 @@ export class OpenRouterProvider implements LLMProvider {
                         ]
                         : prompt
                 }
-            ]
-            // Note: response_format omitted — many OpenRouter models don't support it (400 error)
+            ],
+            response_format: { type: 'json_object' }
         });
 
         let response: any;
@@ -889,8 +879,8 @@ export class OpenRouterProvider implements LLMProvider {
                 messages: [
                     { role: 'system', content: 'UX auditor. Return ONLY valid JSON. No markdown.' },
                     { role: 'user', content: withImages ? content : prompt }
-                ]
-                // Note: response_format omitted — many OpenRouter models don't support it (400 error)
+                ],
+                response_format: { type: 'json_object' }
             });
         };
 
@@ -899,18 +889,13 @@ export class OpenRouterProvider implements LLMProvider {
             response = await this.withRetry(() => makeRequest(true));
         } catch (err: any) {
             if (this.isNoVisionError(err)) {
-                console.warn(`[OpenRouter] Model ${this.modelName} does not support vision — retrying text-only`);
+                console.warn(`Model ${this.modelName} does not support vision — retrying text-only`);
                 response = await this.withRetry(() => makeRequest(false));
-            } else {
-                console.error(`[OpenRouter] analyzePageSections failed for ${pageUrl}: ${err?.message}`);
-                throw err;
-            }
+            } else throw err;
         }
         try {
             return JSON.parse(this.extractJson(this.getContent(response)));
-        } catch (err: any) {
-            const raw = response?.choices?.[0]?.message?.content ?? '(no content)';
-            console.error(`[OpenRouter] analyzePageSections JSON parse failed for ${pageUrl}: ${err?.message} | raw: ${raw.slice(0, 200)}`);
+        } catch {
             return {
                 sections: sections.map(s => ({
                     label: s.label || 'Section',
@@ -948,8 +933,8 @@ export class OpenRouterProvider implements LLMProvider {
                 messages: [
                     { role: 'system', content: 'UX auditor. Return ONLY valid JSON. No markdown.' },
                     { role: 'user', content: withImages ? content : prompt }
-                ]
-                // Note: response_format omitted — many OpenRouter models don't support it (400 error)
+                ],
+                response_format: { type: 'json_object' }
             });
         };
 
@@ -958,10 +943,8 @@ export class OpenRouterProvider implements LLMProvider {
             response = await this.withRetry(() => makeRequest(true));
         } catch (err: any) {
             if (this.isNoVisionError(err)) {
-                console.warn(`[OpenRouter] Model ${this.modelName} does not support vision — retrying text-only`);
                 response = await this.withRetry(() => makeRequest(false));
             } else {
-                console.error(`[OpenRouter] analysePage failed for ${pageUrl}: ${err?.message}`);
                 return pageAnalysisFallback(sections);
             }
         }
@@ -974,9 +957,7 @@ export class OpenRouterProvider implements LLMProvider {
                 next_links: Array.isArray(parsed.next_links) ? parsed.next_links : [],
                 journey_narrative_update: parsed.journey_narrative_update || ''
             };
-        } catch (err: any) {
-            const raw = response?.choices?.[0]?.message?.content ?? '(no content)';
-            console.error(`[OpenRouter] analysePage JSON parse failed for ${pageUrl}: ${err?.message} | raw: ${raw.slice(0, 200)}`);
+        } catch {
             return pageAnalysisFallback(sections);
         }
     }

@@ -19,7 +19,21 @@ interface ActionItemsProps {
     items: ActionItem[];
 }
 
-import { scrollToStep } from '@/lib/utils/scrollToStep';
+async function scrollToStep(personaName: string, stepNumber: number) {
+    const key = `${personaName}-${stepNumber}`;
+    if (!document.querySelector(`[data-step-key="${key}"]`)) {
+        const toggleBtn = document.querySelector(`[data-audit-trail="${personaName}"]`) as HTMLElement | null;
+        if (toggleBtn) {
+            toggleBtn.click();
+            await new Promise<void>(resolve => setTimeout(resolve, 350));
+        }
+    }
+    const el = document.querySelector(`[data-step-key="${key}"]`) as HTMLElement | null;
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.setAttribute('data-highlighted', 'true');
+    setTimeout(() => el.removeAttribute('data-highlighted'), 2000);
+}
 
 export function ActionItems({ items }: ActionItemsProps) {
     const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);

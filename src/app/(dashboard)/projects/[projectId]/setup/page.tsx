@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Globe, Zap, Plus, Check, ArrowLeft, User as UserIcon, Users, Loader2, Sparkles, X, ShoppingCart, Home, Settings, Target, Monitor, Cloud } from 'lucide-react';
+import { Globe, Zap, Plus, Check, ArrowLeft, User as UserIcon, Users, Loader2, Sparkles, X, ShoppingCart, Home, Settings, Target } from 'lucide-react';
 import Link from 'next/link';
 import { createTestRun, generateAIPersonas, suggestAudienceArchetypes } from '../../actions';
 import { SAMPLE_PERSONAS } from '@/lib/constants/personas';
@@ -45,9 +45,6 @@ export default function NewTestRunPage() {
   const [requiresAuth, setRequiresAuth] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [browserMode, setBrowserMode] = useState<'browserbase' | 'local'>('local');
-  const [browserbaseApiKey, setBrowserbaseApiKey] = useState('');
-  const [browserbaseProjectId, setBrowserbaseProjectId] = useState('');
   const [llmProvider, setLlmProvider] = useState<'gemini' | 'openrouter' | 'ollama'>('gemini');
   const [llmApiKey, setLlmApiKey] = useState('');
   const [llmModelName, setLlmModelName] = useState('');
@@ -182,9 +179,6 @@ export default function NewTestRunPage() {
         scope,
         requiresAuth,
         executionMode: 'autonomous',
-        browserMode,
-        browserbaseApiKey: browserbaseApiKey || undefined,
-        browserbaseProjectId: browserbaseProjectId || undefined,
         llmProvider,
         llmApiKey: llmApiKey || undefined,
         llmModelName: llmModelName || undefined,
@@ -280,84 +274,6 @@ export default function NewTestRunPage() {
               />
             </div>
 
-            {/* Browser Mode */}
-            <div className="space-y-3 text-left pt-2 border-t border-slate-100">
-              <div className="flex items-center gap-2.5">
-                <Monitor className="h-4 w-4 text-indigo-500" />
-                <label className="text-sm font-medium text-slate-700">Browser</label>
-              </div>
-              <div className="grid grid-cols-2 gap-2.5">
-                {[
-                  { id: 'browserbase', label: 'Cloud Browser', sub: 'Stagehand + BrowserBase', Icon: Cloud },
-                  { id: 'local', label: 'Local Browser', sub: 'Runs on this machine', Icon: Monitor },
-                ].map(({ id, label, sub, Icon }) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setBrowserMode(id as 'browserbase' | 'local')}
-                    className={`flex items-start gap-3 p-3.5 rounded-xl border transition-all text-left ${browserMode === id ? 'bg-indigo-50 border-indigo-300 ring-2 ring-indigo-100' : 'bg-white border-slate-200 hover:border-slate-300'}`}
-                  >
-                    <Icon className={`h-4 w-4 mt-0.5 shrink-0 ${browserMode === id ? 'text-indigo-600' : 'text-slate-400'}`} />
-                    <div>
-                      <div className="text-sm font-semibold text-slate-900">{label}</div>
-                      <div className="text-xs text-slate-400 leading-tight mt-0.5">{sub}</div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-
-              {browserMode === 'browserbase' && (
-                <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-medium text-slate-600">BrowserBase API Key <span className="text-red-400">*</span></label>
-                      <a
-                        href="https://www.browserbase.com/settings"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-indigo-600 hover:text-indigo-700 transition-colors"
-                      >
-                        Get API key ↗
-                      </a>
-                    </div>
-                    <input
-                      type="password"
-                      value={browserbaseApiKey}
-                      onChange={(e) => setBrowserbaseApiKey(e.target.value)}
-                      placeholder="bb_live_••••••••••••••••••••"
-                      className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-medium text-slate-600">BrowserBase Project ID <span className="text-red-400">*</span></label>
-                      <a
-                        href="https://www.browserbase.com/projects"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-indigo-600 hover:text-indigo-700 transition-colors"
-                      >
-                        Find Project ID ↗
-                      </a>
-                    </div>
-                    <input
-                      type="text"
-                      value={browserbaseProjectId}
-                      onChange={(e) => setBrowserbaseProjectId(e.target.value)}
-                      placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                      className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all font-mono text-sm"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {browserMode === 'local' && (
-                <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                  Local mode runs Chromium on this server. Use Cloud Browser for production deployments.
-                </p>
-              )}
-            </div>
-
             {/* AI Model Selection */}
             <div className="space-y-3 text-left pt-2 border-t border-slate-100">
               <div className="flex items-center gap-2.5">
@@ -374,7 +290,7 @@ export default function NewTestRunPage() {
                   <button
                     key={id}
                     type="button"
-                    onClick={() => { setLlmProvider(id as any); if (id === 'ollama') { setLlmApiKey(''); setLlmModelName(''); } else if (id !== llmProvider) { setLlmApiKey(''); } }}
+                    onClick={() => { setLlmProvider(id as any); if (id !== 'openrouter') { setLlmApiKey(''); if (id !== 'ollama') setLlmModelName(''); } }}
                     className={`flex flex-col items-start gap-1.5 p-3.5 rounded-xl border transition-all text-left ${llmProvider === id ? 'bg-indigo-50 border-indigo-300 ring-2 ring-indigo-100' : 'bg-white border-slate-200 hover:border-slate-300'}`}
                   >
                     <span className="text-sm font-semibold text-slate-900">{label}</span>
@@ -382,29 +298,6 @@ export default function NewTestRunPage() {
                   </button>
                 ))}
               </div>
-
-              {llmProvider === 'gemini' && (
-                <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-medium text-slate-600">Gemini API Key <span className="text-red-400">*</span></label>
-                    <a
-                      href="https://aistudio.google.com/app/apikey"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-indigo-600 hover:text-indigo-700 transition-colors"
-                    >
-                      Get API key ↗
-                    </a>
-                  </div>
-                  <input
-                    type="password"
-                    value={llmApiKey}
-                    onChange={(e) => setLlmApiKey(e.target.value)}
-                    placeholder="AIza••••••••••••••••••••••••••••••••••••"
-                    className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all"
-                  />
-                </div>
-              )}
 
               {llmProvider === 'openrouter' && (
                 <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">
@@ -482,27 +375,6 @@ export default function NewTestRunPage() {
                   setError('Please enter a valid URL (e.g., https://example.com)');
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                   return;
-                }
-
-                if (browserMode === 'browserbase') {
-                  if (!browserbaseApiKey.trim()) {
-                    setError('Please enter your BrowserBase API key.');
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                    return;
-                  }
-                  if (!browserbaseProjectId.trim()) {
-                    setError('Please enter your BrowserBase Project ID.');
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                    return;
-                  }
-                }
-
-                if (llmProvider === 'gemini') {
-                  if (!llmApiKey.trim()) {
-                    setError('Please enter your Gemini API key.');
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                    return;
-                  }
                 }
 
                 if (llmProvider === 'openrouter') {

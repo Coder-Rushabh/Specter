@@ -75,33 +75,22 @@ export async function generateAndStoreReport(testRunId: string, force = false) {
             testRunId,
             userId,
             savedAt: new Date().toISOString(),
-            sessions: sessions.map((session: any) => {
-                // Read terminal logs written by orchestrator during this session
-                const terminalFile = path.join('/tmp', 'specter', `${session.id}-terminal.json`);
-                let terminalLogs: string[] = [];
-                try {
-                    const raw = fs.readFileSync(terminalFile, 'utf8');
-                    terminalLogs = JSON.parse(raw).logs || [];
-                } catch { /* file may not exist yet — non-fatal */ }
-
-                return {
-                    sessionId: session.id,
-                    personaName: session.persona_configs?.name || 'Unknown',
-                    goal: session.persona_configs?.goal_prompt || '',
-                    status: session.status,
-                    terminalLogs,
-                    logs: (session.session_logs || [])
-                        .sort((a: any, b: any) => a.step_number - b.step_number)
-                        .map((log: any) => ({
-                            step: log.step_number,
-                            emotion: log.emotion_tag,
-                            url: log.current_url,
-                            monologue: log.inner_monologue || null,
-                            uxFeedback: log.action_taken?.ux_feedback || (log.action_taken?.type !== 'system' ? log.inner_monologue : null) || null,
-                            actionType: log.action_taken?.type || null,
-                        }))
-                };
-            })
+            sessions: sessions.map((session: any) => ({
+                sessionId: session.id,
+                personaName: session.persona_configs?.name || 'Unknown',
+                goal: session.persona_configs?.goal_prompt || '',
+                status: session.status,
+                logs: (session.session_logs || [])
+                    .sort((a: any, b: any) => a.step_number - b.step_number)
+                    .map((log: any) => ({
+                        step: log.step_number,
+                        emotion: log.emotion_tag,
+                        url: log.current_url,
+                        monologue: log.inner_monologue || null,
+                        uxFeedback: log.action_taken?.ux_feedback || null,
+                        actionType: log.action_taken?.type || null,
+                    }))
+            }))
         };
         fs.writeFileSync(path.join(dir, `${testRunId}.json`), JSON.stringify(output, null, 2));
         console.log(`Logs saved → /tmp/specter/${userId}/${testRunId}.json`);
@@ -171,28 +160,9 @@ export async function generateAndStoreReport(testRunId: string, force = false) {
             const uxNote = log.action_taken?.ux_feedback
                 ? ` | ${String(log.action_taken.ux_feedback).slice(0, 120)}`
                 : '';
-            const sectionEmotion = log.action_taken?.specific_emotion || log.emotion_tag || 'neutral';
             // Format: [PersonaName]S{step} so the LLM can reference steps by persona
-            qualitativeData.push(`  [${personaName}]S${log.step_number}[${sectionEmotion}] ${log.current_url}: ${String(log.inner_monologue || '').slice(0, 150)}${uxNote}`);
+            qualitativeData.push(`  [${personaName}]S${log.step_number}[${log.emotion_tag}] ${log.current_url}: ${String(log.inner_monologue || '').slice(0, 150)}${uxNote}`);
         });
-
-        // Per-page structured findings (friction points + positives from last section of each page)
-        const pageSummaryLogs = logs.filter((log: any) =>
-            Array.isArray(log.action_taken?.friction_points) || Array.isArray(log.action_taken?.positives)
-        );
-        if (pageSummaryLogs.length > 0) {
-            qualitativeData.push(`\n#### Per-page findings for ${personaName}:`);
-            for (const log of pageSummaryLogs) {
-                const pageEmotion: string = log.action_taken?.overall_emotion || '';
-                const friction: string[] = log.action_taken?.friction_points || [];
-                const positives: string[] = log.action_taken?.positives || [];
-                let pagePath = log.current_url;
-                try { pagePath = new URL(log.current_url).pathname; } catch { /* keep full url */ }
-                qualitativeData.push(`\n  Page: ${pagePath}${pageEmotion ? ` | Emotion: ${pageEmotion}` : ''}`);
-                friction.slice(0, 5).forEach((f: string) => qualitativeData.push(`    ✗ ${f}`));
-                positives.slice(0, 5).forEach((p: string) => qualitativeData.push(`    ✓ ${p}`));
-            }
-        }
     }
 
     const averageScore = sessions.length > 0 ? Math.round(totalScore / sessions.length) : 0;
@@ -249,7 +219,7 @@ Output the following Markdown document EXACTLY — no deviations, no extra secti
 - **[issue title]** — [one-sentence description of impact]
 - **[issue title]** — [one-sentence description of impact]
 
-Session details include per-step logs AND per-page structured findings (✗ friction, ✓ positives, page-level emotion). Use these structured findings directly — do not paraphrase away the specific issues. Be balanced and evidence-based. Credit genuine strengths. Focus on patterns that affected multiple pages, not isolated incidents. Only call something a problem if multiple personas or pages experienced it.
+Be balanced and evidence-based. Credit genuine strengths. Focus on patterns that affected multiple steps, not isolated incidents. Only call something a problem if multiple personas experienced it.
 
 Then output action items in EXACTLY this format (outside the markdown above):
 [ACTION_ITEMS]

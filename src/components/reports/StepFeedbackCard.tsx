@@ -29,54 +29,39 @@ interface StepFeedbackCardProps {
 }
 
 const EMOTION_CONFIG: Record<string, any> = {
-    delight: { label: 'Delight', hex: '#10b981', bg: 'bg-emerald-50', text: 'text-emerald-600', border: 'border-emerald-200' },
-    satisfaction: { label: 'Satisfaction', hex: '#34d399', bg: 'bg-emerald-50', text: 'text-emerald-500', border: 'border-emerald-200' },
-    curiosity: { label: 'Curiosity', hex: '#818cf8', bg: 'bg-indigo-50', text: 'text-indigo-500', border: 'border-indigo-200' },
-    surprise: { label: 'Surprise', hex: '#fbbf24', bg: 'bg-amber-50', text: 'text-amber-600', border: 'border-amber-200' },
-    neutral: { label: 'Neutral', hex: '#64748b', bg: 'bg-slate-50', text: 'text-slate-500', border: 'border-slate-200' },
-    confusion: { label: 'Confusion', hex: '#3b82f6', bg: 'bg-blue-50', text: 'text-blue-600', border: 'border-blue-200' },
-    boredom: { label: 'Boredom', hex: '#94a3b8', bg: 'bg-slate-50', text: 'text-slate-400', border: 'border-slate-200' },
-    frustration: { label: 'Frustration', hex: '#ef4444', bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-200' },
-    disappointment: { label: 'Disappointment', hex: '#f87171', bg: 'bg-red-50', text: 'text-red-500', border: 'border-red-200' },
+    delight:        { label: 'Delight',        hex: '#10b981', bg: 'bg-emerald-50', text: 'text-emerald-600', border: 'border-emerald-200' },
+    satisfaction:   { label: 'Satisfaction',   hex: '#34d399', bg: 'bg-emerald-50', text: 'text-emerald-500', border: 'border-emerald-200' },
+    curiosity:      { label: 'Curiosity',      hex: '#818cf8', bg: 'bg-indigo-50',  text: 'text-indigo-500',  border: 'border-indigo-200' },
+    surprise:       { label: 'Surprise',       hex: '#fbbf24', bg: 'bg-amber-50',   text: 'text-amber-600',   border: 'border-amber-200' },
+    neutral:        { label: 'Neutral',        hex: '#64748b', bg: 'bg-slate-50',   text: 'text-slate-500',   border: 'border-slate-200' },
+    confusion:      { label: 'Confusion',      hex: '#3b82f6', bg: 'bg-blue-50',    text: 'text-blue-600',    border: 'border-blue-200' },
+    boredom:        { label: 'Boredom',        hex: '#94a3b8', bg: 'bg-slate-50',   text: 'text-slate-400',   border: 'border-slate-200' },
+    frustration:    { label: 'Frustration',    hex: '#ef4444', bg: 'bg-red-50',     text: 'text-red-600',     border: 'border-red-200' },
+    disappointment: { label: 'Disappointment', hex: '#f87171', bg: 'bg-red-50',     text: 'text-red-500',     border: 'border-red-200' },
 };
 
 const ACTION_ICONS: Record<string, React.ReactNode> = {
-    click: <MousePointerClick className="h-3 w-3" />,
-    type: <Type className="h-3 w-3" />,
-    scroll: <ArrowDown className="h-3 w-3" />,
-    wait: <Clock className="h-3 w-3" />,
+    click:    <MousePointerClick className="h-3 w-3" />,
+    type:     <Type className="h-3 w-3" />,
+    scroll:   <ArrowDown className="h-3 w-3" />,
+    wait:     <Clock className="h-3 w-3" />,
     navigate: <Navigation className="h-3 w-3" />,
     complete: <CheckCircle2 className="h-3 w-3" />,
-    fail: <XCircle className="h-3 w-3" />,
+    fail:     <XCircle className="h-3 w-3" />,
 };
-
-function resolveEmotionKey(emotionTag: string, specificEmotion?: string): string {
-    if (emotionTag && emotionTag !== 'neutral') return emotionTag;
-    const s = (specificEmotion || '').toLowerCase();
-    if (s.includes('frustrat') || s.includes('angry') || s.includes('annoy')) return 'frustration';
-    if (s.includes('disappoint') || s.includes('fail')) return 'disappointment';
-    if (s.includes('confus') || s.includes('skeptic') || s.includes('uncertain') || s.includes('unsure')) return 'confusion';
-    if (s.includes('bore') || s.includes('uninterest')) return 'boredom';
-    if (s.includes('delight') || s.includes('excit') || s.includes('happy')) return 'delight';
-    if (s.includes('satisf') || s.includes('pleased') || s.includes('content')) return 'satisfaction';
-    if (s.includes('curio') || s.includes('intrigu') || s.includes('interest') || s.includes('engag')) return 'curiosity';
-    if (s.includes('surpris') || s.includes('wow') || s.includes('amaz')) return 'surprise';
-    return 'neutral';
-}
 
 export function StepFeedbackCard({ step, personaName }: StepFeedbackCardProps) {
     const [pathsOpen, setPathsOpen] = useState(false);
-    const emotionKey = resolveEmotionKey(step.emotion_tag, step.action_taken?.specific_emotion);
-    const cfg = EMOTION_CONFIG[emotionKey] ?? EMOTION_CONFIG.neutral;
+    const cfg        = EMOTION_CONFIG[step.emotion_tag] ?? EMOTION_CONFIG.neutral;
     const actionType = step.action_taken?.type ?? 'system';
-    let uxFeedback = step.action_taken?.ux_feedback as any;
+    let uxFeedback   = step.action_taken?.ux_feedback as any;
     if (uxFeedback && typeof uxFeedback === 'object') {
         uxFeedback = uxFeedback.overall || uxFeedback.feedback || JSON.stringify(uxFeedback);
     }
-    const hasFeedback = uxFeedback && uxFeedback !== 'undefined' && String(uxFeedback).length > 5;
-    const paths = step.action_taken?.possible_paths ?? [];
+    const hasFeedback  = uxFeedback && uxFeedback !== 'undefined' && String(uxFeedback).length > 5;
+    const paths        = step.action_taken?.possible_paths ?? [];
     const hasScreenshot = !!step.screenshot_url;
-    const stepKey = personaName ? `${personaName}-${step.step_number}` : undefined;
+    const stepKey      = personaName ? `${personaName}-${step.step_number}` : undefined;
 
     return (
         <div
@@ -104,13 +89,13 @@ export function StepFeedbackCard({ step, personaName }: StepFeedbackCardProps) {
                             </span>
                         </div>
 
-                        {/* Action type badge
+                        {/* Action type badge */}
                         <div className="absolute top-3 right-3 z-10">
                             <span className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white border border-slate-200 text-[10px] font-medium text-slate-600 shadow-sm">
                                 {ACTION_ICONS[actionType]}
                                 <span className="capitalize">{actionType}</span>
                             </span>
-                        </div> */}
+                        </div>
 
                         {/* Screenshot */}
                         <div className="relative">

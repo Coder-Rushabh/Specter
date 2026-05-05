@@ -3,20 +3,20 @@
  * and frontend (UI).
  *
  * Score range: 0–100
- * Neutral baseline: 70  (a product users feel nothing about is mediocre, not terrible)
- * Positive headroom: 30 points (70→100) — rewarded by delight/satisfaction
- * Negative headroom: 70 points (70→0)  — punished by frustration/confusion
+ * Neutral baseline: 60  (a product users feel nothing about is mediocre, not good)
+ * Positive headroom: 40 points (60→100) — rewarded by delight/satisfaction
+ * Negative headroom: 60 points (60→0)  — punished by frustration/confusion
  *
  * Weighting rationale:
  *  - Frustration is the strongest negative signal  (-20) — users may churn
  *  - Disappointment is severe but recoverable      (-12)
  *  - Confusion is a hard blocker                  (-10)
  *  - Boredom signals disengagement                (-6)
- *  - Delight is the gold standard positive        (+20)
- *  - Surprise can be positive (discovery)         (+12)
- *  - Satisfaction is quiet success                (+12)
- *  - Curiosity keeps users exploring              (+8)
- *  - Neutral is truly zero — neither good nor bad  (0)
+ *  - Delight is the gold standard positive        (+15)
+ *  - Surprise can be positive (discovery)          (+8)
+ *  - Satisfaction is quiet success                 (+6)
+ *  - Curiosity keeps users exploring               (+4)
+ *  - Neutral is truly zero — neither good nor bad   (0)
  */
 
 export type UXEmotionTag =
@@ -31,10 +31,10 @@ export const ALL_EMOTIONS: UXEmotionTag[] = [
 ];
 
 export const EMOTION_WEIGHTS: Record<string, number> = {
-    delight: 20,
-    satisfaction: 12,
-    curiosity: 8,
-    surprise: 12,
+    delight: 15,
+    satisfaction: 6,
+    curiosity: 4,
+    surprise: 8,
     neutral: 0,
     confusion: -10,
     boredom: -6,
@@ -43,8 +43,8 @@ export const EMOTION_WEIGHTS: Record<string, number> = {
 };
 
 // Score mapping constants
-const NEUTRAL_BASELINE = 70;   // neutral average → 70/100
-const MAX_WEIGHT = 20;         // delight weight (maps to 100)
+const NEUTRAL_BASELINE = 60;   // neutral average → 60/100
+const MAX_WEIGHT = 15;         // delight weight (maps to 100)
 const MIN_WEIGHT = -20;        // frustration weight (maps to 0)
 
 export interface ScoringLog {

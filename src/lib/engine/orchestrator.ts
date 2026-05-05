@@ -57,9 +57,6 @@ export class Orchestrator {
     private logBuffer: any[] = [];
     private stepNumber = 1;
 
-    // Terminal log buffer — written to /tmp/specter/{sessionId}-terminal.json at session end
-    private terminalLogs: string[] = [];
-
     // Header/footer fingerprints seen across pages this session.
     // When the same header/footer appears again we skip those slices in the LLM call
     // to avoid re-analyzing identical chrome on every page.
@@ -76,15 +73,12 @@ export class Orchestrator {
         sessionId: string,
         url: string,
         persona: PersonaProfile,
-        llmConfig?: { provider: 'gemini' | 'openrouter' | 'ollama' | 'openai'; apiKey?: string; modelName?: string },
-        browserMode?: 'browserbase' | 'local',
-        browserbaseCreds?: { apiKey?: string; projectId?: string }
+        llmConfig?: { provider: 'gemini' | 'openrouter' | 'ollama' | 'openai'; apiKey?: string; modelName?: string }
     ) {
         this.clog(sessionId, `SESSION START | persona: ${persona.name} | url: ${url} | provider: ${llmConfig?.provider ?? 'gemini'} | model: ${llmConfig?.modelName ?? 'default'}`);
         this.channel = this.supabase.channel(`terminal_${sessionId}`).subscribe();
 
         let testRunId: string | undefined;
-        let userId: string | undefined;
         const MAX_RETRIES = 2;
 
         for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -102,25 +96,7 @@ export class Orchestrator {
                 if (sessionError || !sessionData) throw new Error(`Failed to fetch session: ${sessionError?.message}`);
 
                 testRunId = sessionData.test_run_id;
-                userId = sessionData.persona_configs?.projects?.user_id;
                 const executionMode = sessionData.execution_mode || 'autonomous';
-
-                this.clog(sessionId, `[setup] session DB row — execution_mode: ${executionMode} | browser_mode: ${sessionData.browser_mode ?? 'null (column missing?)'}`);
-                this.clog(sessionId, `[setup] testRunId: ${testRunId} | userId: ${userId ?? 'null'}`);
-
-                // Resolve browser mode: explicit param > DB column > env detection.
-                // Always fall back to local if browserbase was requested but the API key is absent.
-                const requestedMode: 'browserbase' | 'local' = browserMode
-                    ?? (sessionData.browser_mode === 'local' ? 'local'
-                        : sessionData.browser_mode === 'browserbase' ? 'browserbase'
-                        : process.env.BROWSERBASE_API_KEY ? 'browserbase' : 'local');
-                const hasBrowserbaseCreds = !!(browserbaseCreds?.apiKey || process.env.BROWSERBASE_API_KEY);
-                const resolvedBrowserMode: 'browserbase' | 'local' =
-                    requestedMode === 'browserbase' && !hasBrowserbaseCreds
-                        ? 'local'
-                        : requestedMode;
-
-                this.clog(sessionId, `[setup] resolvedBrowserMode: ${resolvedBrowserMode} (requested: ${requestedMode} | param: ${browserMode ?? 'unset'} | env BROWSERBASE_API_KEY: ${!!process.env.BROWSERBASE_API_KEY})`);
 
                 let provider: 'gemini' | 'openrouter' | 'ollama' | 'openai';
                 let apiKey: string | undefined;
@@ -130,17 +106,13 @@ export class Orchestrator {
                     provider = llmConfig.provider;
                     apiKey = llmConfig.apiKey;
                     modelName = llmConfig.modelName;
-                    this.clog(sessionId, `[setup] LLM from llmConfig — provider: ${provider} | model: ${modelName ?? 'default'} | apiKey present: ${!!apiKey}`);
                 } else {
                     const project = sessionData.persona_configs?.projects;
                     provider = project?.llm_provider || 'gemini';
                     modelName = project?.llm_model_name || undefined;
                     if (project?.encrypted_llm_key) {
-                        try { apiKey = decrypt(project.encrypted_llm_key); } catch (decryptErr: any) {
-                            this.clog(sessionId, `[setup] WARNING: failed to decrypt LLM key — ${decryptErr.message}`);
-                        }
+                        try { apiKey = decrypt(project.encrypted_llm_key); } catch (_) { }
                     }
-                    this.clog(sessionId, `[setup] LLM from DB project — provider: ${provider} | model: ${modelName ?? 'default'} | encrypted_key present: ${!!project?.encrypted_llm_key} | decrypted: ${!!apiKey}`);
                 }
 
                 this.llm = new LLMService({ provider, apiKey, modelName });
@@ -160,22 +132,18 @@ export class Orchestrator {
                 // ── 1. Browser init (once per session, not per page) ─────────
                 // Opening Stagehand per-page costs ~5-7 s each (Playwright launch +
                 // Gemini connectivity check). We init once and reuse across pages.
-                this.clog(sessionId, '[browser] Acquiring browser semaphore...');
                 await acquireBrowser();
                 browserAcquired = true;
-                this.clog(sessionId, '[browser] Semaphore acquired. Starting browser init...');
+                this.clog(sessionId, 'Browser init start...');
                 const browserInitStart = Date.now();
-                // Use the user-supplied Gemini key (stored encrypted in DB) for browser init.
-                // Fall back to env key only if no user key was provided.
-                const browserApiKey = (provider === 'gemini' ? apiKey : undefined) || process.env.GEMINI_API_KEY;
-                this.clog(sessionId, `[browser] browserApiKey present: ${!!browserApiKey} | prefix: ${browserApiKey?.slice(0, 8) ?? 'none'} | mode: ${resolvedBrowserMode}`);
-                await this.browser.init('google/gemini-2.0-flash', browserApiKey, resolvedBrowserMode, browserbaseCreds);
-                this.clog(sessionId, `[browser] Browser ready in ${Date.now() - browserInitStart}ms`);
+                await this.browser.init('google/gemini-2.0-flash', process.env.GEMINI_API_KEY);
+                this.clog(sessionId, `Browser ready in ${Date.now() - browserInitStart}ms`);
 
                 // ── 2. Crawl-Reason-Repeat traversal ────────────────────────
                 const resumeState = attempt > 1 ? await this.buildResumeState(sessionId) : null;
                 const browserModel = 'google/gemini-2.0-flash';
-                await this.runCrawl(sessionId, url, persona, browserModel, browserApiKey, resumeState, resolvedBrowserMode, browserbaseCreds);
+                const browserApiKey = process.env.GEMINI_API_KEY;
+                await this.runCrawl(sessionId, url, persona, browserModel, browserApiKey, resumeState);
 
                 // ── 2. Complete ──────────────────────────────────────────────
                 await this.flushLogs();
@@ -192,9 +160,6 @@ export class Orchestrator {
 
             } catch (err: any) {
                 console.error(`Session ${sessionId} attempt ${attempt} failed:`, err.message);
-                console.error(`Session ${sessionId} stack:`, err.stack);
-                this.clog(sessionId, `[ERROR] attempt ${attempt} failed: ${err.message}`);
-                this.clog(sessionId, `[ERROR] stack: ${err.stack?.split('\n').slice(0, 4).join(' | ')}`);
                 this.updateLiveStatus(sessionId, `Error: ${err.message}`);
 
                 // Browser-level failure that escaped runCrawl (e.g. during browser.init()
@@ -230,7 +195,6 @@ export class Orchestrator {
                 await this.browser.close().catch(() => { });
                 if (browserAcquired) releaseBrowser();
                 await this.flushLogs();
-                this.flushTerminalLogs(sessionId, testRunId, userId);
                 if (testRunId) await checkAndFinalizeTestRun(testRunId).catch(() => { });
             }
         }
@@ -262,38 +226,7 @@ export class Orchestrator {
 
     private clog(sid: string, msg: string) {
         const ts = new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm
-        const line = `[${ts}] [${sid.slice(0, 8)}] ${msg}`;
-        console.log(line);
-        this.terminalLogs.push(line);
-    }
-
-    private flushTerminalLogs(sessionId: string, testRunId?: string, userId?: string) {
-        try {
-            const dir = path.join('/tmp', 'specter');
-            fs.mkdirSync(dir, { recursive: true });
-
-            // Write per-session terminal file
-            fs.writeFileSync(
-                path.join(dir, `${sessionId}-terminal.json`),
-                JSON.stringify({ sessionId, logs: this.terminalLogs }, null, 2)
-            );
-
-            // Patch the main testRunId JSON if it already exists (fixes UI-stop race condition:
-            // reporter writes the main file before the orchestrator finally-block runs)
-            if (testRunId && userId) {
-                const mainFile = path.join(dir, userId, `${testRunId}.json`);
-                if (fs.existsSync(mainFile)) {
-                    const mainData = JSON.parse(fs.readFileSync(mainFile, 'utf8'));
-                    for (const session of mainData.sessions || []) {
-                        if (session.sessionId === sessionId) {
-                            session.terminalLogs = this.terminalLogs;
-                            break;
-                        }
-                    }
-                    fs.writeFileSync(mainFile, JSON.stringify(mainData, null, 2));
-                }
-            }
-        } catch (_) { /* non-fatal */ }
+        console.log(`[${ts}] [${sid.slice(0, 8)}] ${msg}`);
     }
 
     // ─── Crawl-Reason-Repeat traversal ────────────────────────────────────────
@@ -310,9 +243,7 @@ export class Orchestrator {
         persona: PersonaProfile,
         browserModel: string,
         browserApiKey: string | undefined,
-        resume?: { visited: Set<string>; resumeUrl: string | null } | null,
-        browserMode?: 'browserbase' | 'local',
-        browserbaseCreds?: { apiKey?: string; projectId?: string }
+        resume?: { visited: Set<string>; resumeUrl: string | null } | null
     ) {
         const siteMap = new SiteMap(startUrl);
 
@@ -409,7 +340,7 @@ export class Orchestrator {
                         { type: 'system', info: 'browser_session_renewed' });
                     await this.flushLogs();
                     try {
-                        await this.browser.init(browserModel, browserApiKey, browserMode, browserbaseCreds);
+                        await this.browser.init(browserModel, browserApiKey);
                     } catch (initErr: any) {
                         this.clog(sessionId, `║  ✖ Browser re-init failed: ${initErr.message} — stopping crawl.`);
                         break;
@@ -799,14 +730,13 @@ export class Orchestrator {
 
     private mapEmotion(state: string): string {
         const s = (state || 'neutral').toLowerCase();
-        if (s.includes('frustrat') || s.includes('angry') || s.includes('annoy') || s.includes('irritat')) return 'frustration';
-        if (s.includes('disappoint') || s.includes('fail') || s.includes('let down') || s.includes('disatisf')) return 'disappointment';
-        if (s.includes('confus') || s.includes('lost') || s.includes('skeptic') || s.includes('uncertain') || s.includes('unsure') || s.includes('unclear')) return 'confusion';
-        if (s.includes('bore') || s.includes('slow') || s.includes('uninterest') || s.includes('tedious')) return 'boredom';
-        if (s.includes('happy') || s.includes('delight') || s.includes('excit') || s.includes('love') || s.includes('thrilled') || s.includes('great')) return 'delight';
-        if (s.includes('satisf') || s.includes('pleased') || s.includes('content') || s.includes('good')) return 'satisfaction';
-        if (s.includes('curio') || s.includes('interest') || s.includes('intrigu') || s.includes('engag') || s.includes('fascin')) return 'curiosity';
-        if (s.includes('surpris') || s.includes('unexpected') || s.includes('wow') || s.includes('amaz') || s.includes('impress')) return 'surprise';
+        if (s.includes('frustrat') || s.includes('angry')) return 'frustration';
+        if (s.includes('disappoint') || s.includes('fail')) return 'disappointment';
+        if (s.includes('confus') || s.includes('lost')) return 'confusion';
+        if (s.includes('bore') || s.includes('slow')) return 'boredom';
+        if (s.includes('happy') || s.includes('delight')) return 'delight';
+        if (s.includes('satisf') || s.includes('good')) return 'satisfaction';
+        if (s.includes('curio') || s.includes('interest')) return 'curiosity';
         return 'neutral';
     }
 

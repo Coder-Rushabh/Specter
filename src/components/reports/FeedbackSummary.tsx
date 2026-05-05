@@ -6,7 +6,7 @@ import {
     Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
     Tooltip,
 } from 'recharts';
-import { Sparkles, MousePointerClick, ChevronDown } from 'lucide-react';
+import { Sparkles, MousePointerClick } from 'lucide-react';
 
 interface FeedbackLog {
     step_number: number;
@@ -26,20 +26,34 @@ interface FeedbackSummaryProps {
 }
 
 const EMOTION_COLORS: Record<string, string> = {
-    delight: '#10b981',
-    satisfaction: '#34d399',
-    curiosity: '#818cf8',
-    surprise: '#fbbf24',
-    neutral: '#475569',
-    confusion: '#3b82f6',
-    boredom: '#94a3b8',
-    frustration: '#ef4444',
+    delight:        '#10b981',
+    satisfaction:   '#34d399',
+    curiosity:      '#818cf8',
+    surprise:       '#fbbf24',
+    neutral:        '#475569',
+    confusion:      '#3b82f6',
+    boredom:        '#94a3b8',
+    frustration:    '#ef4444',
     disappointment: '#f87171',
 };
 
 import { EMOTION_WEIGHTS } from '@/lib/utils/scoring';
 
-import { scrollToStep } from '@/lib/utils/scrollToStep';
+async function scrollToStep(personaName: string, stepNumber: number) {
+    const key = `${personaName}-${stepNumber}`;
+    if (!document.querySelector(`[data-step-key="${key}"]`)) {
+        const toggleBtn = document.querySelector(`[data-audit-trail="${personaName}"]`) as HTMLElement | null;
+        if (toggleBtn) {
+            toggleBtn.click();
+            await new Promise<void>(resolve => setTimeout(resolve, 350));
+        }
+    }
+    const el = document.querySelector(`[data-step-key="${key}"]`) as HTMLElement | null;
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.setAttribute('data-highlighted', 'true');
+    setTimeout(() => el.removeAttribute('data-highlighted'), 2000);
+}
 
 /* Custom tooltip for area chart */
 const HealthTooltip = ({ active, payload, label }: any) => {
@@ -96,20 +110,16 @@ function topPhrases(logs: FeedbackLog[], limit = 8): { phrase: string; count: nu
             count: data.count,
             tag: data.tags.includes('frustration') ? 'frustration'
                 : data.tags.includes('confusion') ? 'confusion'
-                    : data.tags.includes('delight') ? 'delight' : 'neutral',
+                : data.tags.includes('delight') ? 'delight' : 'neutral',
         }));
 }
 
 export function FeedbackSummary({ logs, summary, id, personaName }: FeedbackSummaryProps) {
     const [selectedEmotion, setSelectedEmotion] = useState<string | null>(null);
-    const [legendOpen, setLegendOpen] = useState(false);
-
-    // Exclude system logs (session_started, session_completed, etc.) from all emotion UI
-    const pageLogs = logs.filter(l => (l.action_taken as any)?.type !== 'system');
 
     const sentimentGroups = ['delight', 'satisfaction', 'curiosity', 'surprise', 'neutral', 'confusion', 'boredom', 'frustration', 'disappointment'];
     const radarData = sentimentGroups.map(emo => {
-        const matchingLogs = pageLogs.filter(l => l.emotion_tag === emo);
+        const matchingLogs = logs.filter(l => l.emotion_tag === emo);
         const count = matchingLogs.length;
         const avgIntensity = count > 0
             ? matchingLogs.reduce((acc, l) => {
@@ -130,11 +140,11 @@ export function FeedbackSummary({ logs, summary, id, personaName }: FeedbackSumm
     const activeEmotions = radarData.filter(d => d.A > 0);
 
     const selectedSteps = selectedEmotion
-        ? Array.from(new Set(pageLogs.filter(l => l.emotion_tag === selectedEmotion).map(l => l.step_number))).sort((a, b) => a - b)
+        ? logs.filter(l => l.emotion_tag === selectedEmotion).map(l => l.step_number).sort((a, b) => a - b)
         : [];
 
     let currentHealth = 100;
-    const healthData = [...pageLogs]
+    const healthData = [...logs]
         .sort((a, b) => a.step_number - b.step_number)
         .map(l => {
             const w = EMOTION_WEIGHTS[l.emotion_tag];
@@ -146,8 +156,8 @@ export function FeedbackSummary({ logs, summary, id, personaName }: FeedbackSumm
             return { step: l.step_number, health: Math.round(currentHealth), emotion: l.emotion_tag };
         });
 
-    const worstHealth = healthData.length > 0 ? Math.min(...healthData.map(d => d.health)) : 100;
-    const currentLevel = healthData[healthData.length - 1]?.health ?? 100;
+    const worstHealth   = healthData.length > 0 ? Math.min(...healthData.map(d => d.health)) : 100;
+    const currentLevel  = healthData[healthData.length - 1]?.health ?? 100;
 
     const feedbackQuotes = Array.from(
         new Set(
@@ -209,8 +219,8 @@ export function FeedbackSummary({ logs, summary, id, personaName }: FeedbackSumm
                                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium capitalize transition-all"
                                         style={{
                                             borderColor: isSelected ? color : color + '40',
-                                            background: isSelected ? color + '15' : color + '08',
-                                            color: isSelected ? color : '#64748b',
+                                            background:  isSelected ? color + '15' : color + '08',
+                                            color:       isSelected ? color : '#64748b',
                                         }}
                                     >
                                         <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ background: color }} />
@@ -238,7 +248,7 @@ export function FeedbackSummary({ logs, summary, id, personaName }: FeedbackSumm
                                             className="px-2.5 py-1 rounded-md border text-[10px] font-medium transition-all hover:scale-105"
                                             style={{
                                                 borderColor: color + '40',
-                                                background: color + '10',
+                                                background:  color + '10',
                                                 color,
                                             }}
                                         >
@@ -250,41 +260,6 @@ export function FeedbackSummary({ logs, summary, id, personaName }: FeedbackSumm
                         )}
                     </div>
                 )}
-
-                {/* Emotion category legend */}
-                <div className="border-t border-slate-100 pt-3">
-                    <button
-                        onClick={() => setLegendOpen(v => !v)}
-                        className="flex items-center gap-1.5 text-[10px] font-medium text-slate-400 hover:text-slate-600 transition-colors"
-                    >
-                        <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${legendOpen ? 'rotate-180' : ''}`} />
-                        How we categorise emotions
-                    </button>
-
-                    {legendOpen && (
-                        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {[
-                                { category: 'Curiosity', color: '#818cf8', examples: ['Intrigued', 'Slightly interested', 'Engaged', 'Fascinated', 'Curious'] },
-                                { category: 'Delight', color: '#10b981', examples: ['Happy', 'Excited', 'Delighted', 'Thrilled', 'Love it', 'Great'] },
-                                { category: 'Satisfaction', color: '#34d399', examples: ['Satisfied', 'Pleased', 'Content', 'Good'] },
-                                { category: 'Surprise', color: '#fbbf24', examples: ['Surprised', 'Wow', 'Amazing', 'Impressed', 'Unexpected'] },
-                                { category: 'Confusion', color: '#3b82f6', examples: ['Confused', 'Lost', 'Skeptical', 'Uncertain', 'Unsure', 'Unclear'] },
-                                { category: 'Frustration', color: '#ef4444', examples: ['Frustrated', 'Angry', 'Annoyed', 'Irritated'] },
-                                { category: 'Disappointment', color: '#f87171', examples: ['Disappointed', 'Let down', 'Failed expectation'] },
-                                { category: 'Boredom', color: '#94a3b8', examples: ['Bored', 'Disengaged', 'Uninterested', 'Tedious'] },
-                                { category: 'Neutral', color: '#64748b', examples: ['No strong reaction', 'Indifferent'] },
-                            ].map(({ category, color, examples }) => (
-                                <div key={category} className="flex items-start gap-2">
-
-                                    <div className="min-w-0">
-                                        <span className="text-[10px] font-semibold" style={{ color }}>{category}</span>
-                                        <span className="text-[10px] text-slate-400"> — {examples.join(', ')}</span>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
             </div>
 
             {/* ── UX Health Journey + Stats ── */}
@@ -302,7 +277,7 @@ export function FeedbackSummary({ logs, summary, id, personaName }: FeedbackSumm
                             <AreaChart data={healthData} margin={{ top: 5, right: 10, left: -25, bottom: 0 }}>
                                 <defs>
                                     <linearGradient id="healthColor" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.2} />
+                                        <stop offset="5%"  stopColor="#6366f1" stopOpacity={0.2} />
                                         <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
                                     </linearGradient>
                                 </defs>
@@ -330,7 +305,7 @@ export function FeedbackSummary({ logs, summary, id, personaName }: FeedbackSumm
                                     strokeWidth={2}
                                     dot={(dotProps: any) => {
                                         const { cx, cy, payload } = dotProps;
-                                        const h = payload.health;
+                                        const h    = payload.health;
                                         const fill = h > 70 ? '#10b981' : h > 40 ? '#f59e0b' : '#ef4444';
                                         return (
                                             <circle
@@ -349,7 +324,7 @@ export function FeedbackSummary({ logs, summary, id, personaName }: FeedbackSumm
                                     }}
                                     activeDot={(dotProps: any) => {
                                         const { cx, cy, payload } = dotProps;
-                                        const h = payload.health;
+                                        const h    = payload.health;
                                         const fill = h > 70 ? '#10b981' : h > 40 ? '#f59e0b' : '#ef4444';
                                         return (
                                             <circle
@@ -427,9 +402,9 @@ export function FeedbackSummary({ logs, summary, id, personaName }: FeedbackSumm
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         {feedbackQuotes.map((quote, i) => {
-                            const matchedLog = logs.find(l => l.action_taken?.ux_feedback === quote);
-                            const emotion = matchedLog?.emotion_tag || 'neutral';
-                            const color = EMOTION_COLORS[emotion];
+                            const matchedLog  = logs.find(l => l.action_taken?.ux_feedback === quote);
+                            const emotion     = matchedLog?.emotion_tag || 'neutral';
+                            const color       = EMOTION_COLORS[emotion];
                             return (
                                 <div
                                     key={i}
